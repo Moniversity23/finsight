@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TxnLookup v2 — Smart Statement Search</title>
+
+<!-- Core libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/7.0.0/fuse.min.js"></script>
+
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fira+Code:wght@300;400;500&display=swap" rel="stylesheet"/>
+
+<style>
+:root {
+  --bg: #060912;
+  --surface: #0d1120;
+  --surface2: #131929;
+  --surface3: #1a2236;
+  --border: #1e2d47;
+  --border2: #243352;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59,130,246,0.18);
+  --accent2: #f59e0b;
+  --accent3: #10b981;
+  --red: #ef4444;
+  --text: #e2e8f0;
+  --text-muted: #64748b;
+  --text-dim: #2d3e5a;
+  --sent: #ef4444;
+  --received: #10b981;
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Plus Jakarta Sans',sans-serif;
+  min-height:100vh;
+  overflow-x:hidden;
+}
+
+/* Subtle starfield bg */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(59,130,246,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(16,185,129,0.05) 0%, transparent 60%);
+  pointer-events:none;z-index:0;
+}
+
+.wrap{position:relative;z-index:1;max-width:1040px;margin:0 auto;padding:32px 20px 80px}
+
+/* ── HEADER ── */
+.header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:48px;padding-bottom:24px;
+  border-bottom:1px solid var(--border);
+}
+.brand{display:flex;align-items:center;gap:14px}
+.brand-icon{
+  width:44px;height:44px;background:var(--accent);border-radius:10px;
+  display:flex;align-items:center;justify-content:center;font-size:20px;
+  box-shadow:0 0 24px rgba(59,130,246,0.4);
+}
+.brand-text h1{font-size:22px;font-weight:800;letter-spacing:-0.5px}
+.brand-text p{font-size:11px;color:var(--text-muted);font-family:'Fira Code',monospace;margin-top:2px}
+.v-tag{
+  font-family:'Fira Code',monospace;font-size:10px;
+  background:var(--surface3);border:1px solid var(--border2);
+  padding:5px 12px;border-radius:20px;color:var(--text-muted);
+}
+
+/* ── CAPABILITY PILLS ── */
+.caps{
+  display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px;
+}
+.cap{
+  font-size:11px;font-family:'Fira Code',monospace;
+  background:var(--surface2);border:1px solid var(--border);
+  padding:5px 12px;border-radius:20px;color:var(--text-muted);
+  display:flex;align-items:center;gap:6px;
+}
+.cap .dot{width:6px;height:6px;border-radius:50%;background:var(--accent3)}
+
+/* ── MAIN PANEL ── */
+.main-panel{
+  display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;
+}
+
+.panel{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:24px;
+  transition:border-color .3s;
+}
+.panel.active{border-color:var(--accent)}
+.panel.active .panel-header .step-badge{background:var(--accent);color:#fff}
+
+.panel-header{
+  display:flex;align-items:center;gap:10px;margin-bottom:18px;
+}
+.step-badge{
+  width:24px;height:24px;border-radius:6px;
+  background:var(--surface3);
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--text-muted);
+  transition:all .3s;flex-shrink:0;
+}
+.panel-header h3{font-size:13px;font-weight:700;color:var(--text)}
+.panel-sub{font-size:11px;color:var(--text-muted);font-family:'Fira Code',monospace}
+
+/* ── DROP ZONE ── */
+.drop-zone{
+  border:2px dashed var(--border2);border-radius:10px;
+  padding:28px 16px;text-align:center;cursor:pointer;
+  transition:all .3s;position:relative;
+}
+.drop-zone:hover,.drop-zone.drag-over{
+  border-color:var(--accent);background:var(--accent-glow);
+}
+.drop-zone input[type=file]{
+  position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;
+}
+.drop-icon{font-size:28px;display:block;margin-bottom:8px}
+.drop-label{font-size:12px;color:var(--text-muted);line-height:1.6}
+.drop-label strong{color:var(--text);display:block;font-size:13px;margin-bottom:3px}
+.drop-formats{
+  display:flex;flex-wrap:wrap;gap:4px;margin-top:10px;justify-content:center;
+}
+.fmt-badge{
+  font-size:9px;font-family:'Fira Code',monospace;
+  background:var(--surface3);border:1px solid var(--border);
+  padding:2px 7px;border-radius:4px;color:var(--text-muted);
+}
+
+/* ── FILE LOADED ── */
+.file-loaded{
+  background:rgba(59,130,246,0.07);border:1px solid rgba(59,130,246,0.3);
+  border-radius:10px;padding:12px 14px;
+  display:flex;align-items:center;gap:10px;
+}
+.file-loaded .fi{font-size:18px}
+.file-loaded .fn{flex:1;min-width:0}
+.file-loaded .fn strong{
+  font-size:12px;font-family:'Fira Code',monospace;
+  color:var(--accent);display:block;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.file-loaded .fn span{font-size:10px;color:var(--text-muted)}
+.btn-x{
+  background:none;border:none;color:var(--text-muted);
+  cursor:pointer;font-size:16px;padding:0;line-height:1;
+  transition:color .2s;flex-shrink:0;
+}
+.btn-x:hover{color:var(--red)}
+
+/* Processing bar */
+.proc-bar{
+  margin-top:12px;background:var(--surface3);border-radius:6px;overflow:hidden;height:4px;
+}
+.proc-bar-fill{
+  height:100%;background:linear-gradient(90deg,var(--accent),var(--accent3));
+  border-radius:6px;width:0%;transition:width .4s ease;
+}
+.proc-status{
+  font-size:10px;font-family:'Fira Code',monospace;
+  color:var(--text-muted);margin-top:6px;text-align:center;
+}
+
+/* ── SEARCH PANEL ── */
+.search-input{
+  width:100%;background:var(--surface2);
+  border:1px solid var(--border2);border-radius:10px;
+  padding:14px 16px;font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:15px;color:var(--text);outline:none;
+  transition:border-color .3s,box-shadow .3s;
+}
+.search-input:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(59,130,246,0.12);
+}
+.search-input::placeholder{color:var(--text-dim)}
+
+.fuzzy-hint{
+  font-size:10px;font-family:'Fira Code',monospace;
+  color:var(--text-muted);margin-top:8px;
+  display:flex;align-items:center;gap:6px;
+}
+.fuzzy-hint .dot{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--accent3);display:inline-block;
+}
+
+.threshold-row{
+  display:flex;align-items:center;gap:10px;margin-top:12px;
+}
+.threshold-row label{font-size:11px;color:var(--text-muted);flex-shrink:0}
+.threshold-row input[type=range]{
+  flex:1;accent-color:var(--accent);cursor:pointer;
+}
+.threshold-val{
+  font-family:'Fira Code',monospace;font-size:11px;
+  color:var(--accent);width:30px;text-align:right;flex-shrink:0;
+}
+
+/* ── SEARCH BUTTON ── */
+.btn-search{
+  width:100%;margin-top:20px;padding:15px;
+  background:var(--accent);border:none;border-radius:10px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;
+  color:#fff;cursor:pointer;letter-spacing:0.3px;
+  transition:all .25s;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.btn-search:hover:not(:disabled){
+  background:#2563eb;box-shadow:0 4px 20px rgba(59,130,246,0.4);transform:translateY(-1px);
+}
+.btn-search:disabled{opacity:.4;cursor:not-allowed;transform:none}
+
+/* ── RESULTS ── */
+.divider{
+  border:none;border-top:1px solid var(--border);margin:28px 0;
+}
+
+/* Matches badge area */
+.match-meta{
+  display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap;
+}
+.match-title{font-size:18px;font-weight:800;letter-spacing:-0.3px}
+.match-title span{color:var(--accent)}
+.match-count{
+  font-family:'Fira Code',monospace;font-size:11px;
+  background:var(--surface3);border:1px solid var(--border2);
+  padding:4px 10px;border-radius:20px;color:var(--text-muted);
+}
+.match-fuzzy-tag{
+  font-size:10px;font-family:'Fira Code',monospace;
+  background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);
+  padding:4px 10px;border-radius:20px;color:var(--accent2);
+}
+
+/* Summary cards */
+.summary-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;
+}
+.s-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:16px;
+}
+.s-label{font-size:10px;font-family:'Fira Code',monospace;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+.s-value{font-size:20px;font-weight:800;letter-spacing:-0.5px;line-height:1}
+.s-value.count{color:var(--text)}
+.s-value.sent{color:var(--sent)}
+.s-value.received{color:var(--received)}
+.s-value.net-pos{color:var(--received)}
+.s-value.net-neg{color:var(--sent)}
+.s-sub{font-size:10px;color:var(--text-muted);margin-top:4px}
+
+/* Table */
+.table-wrap{overflow-x:auto;border-radius:var(--radius-sm);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{
+  background:var(--surface2);
+  padding:10px 14px;text-align:left;
+  font-size:10px;font-family:'Fira Code',monospace;
+  color:var(--text-muted);font-weight:500;
+  text-transform:uppercase;letter-spacing:1px;
+  border-bottom:1px solid var(--border);
+  white-space:nowrap;
+}
+tbody tr{border-bottom:1px solid var(--border);transition:background .15s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:var(--surface2)}
+td{padding:11px 14px;vertical-align:middle}
+.td-date{
+  font-family:'Fira Code',monospace;font-size:11px;
+  color:var(--text);white-space:nowrap;min-width:90px;
+}
+.td-day{
+  display:block;font-size:18px;font-weight:700;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  color:var(--text);line-height:1.1;
+}
+.td-mon{
+  display:block;font-size:10px;
+  font-family:'Fira Code',monospace;
+  color:var(--accent);letter-spacing:0.5px;margin-top:1px;
+}
+.td-time{font-size:10px;color:var(--text-muted);margin-top:2px}
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:10px;font-family:'Fira Code',monospace;font-weight:600;
+  padding:3px 8px;border-radius:4px;
+}
+.badge.sent{background:rgba(239,68,68,0.12);color:var(--sent);border:1px solid rgba(239,68,68,0.2)}
+.badge.recv{background:rgba(16,185,129,0.12);color:var(--received);border:1px solid rgba(16,185,129,0.2)}
+.td-desc{max-width:320px;font-size:12px;color:var(--text);line-height:1.4}
+.td-desc .desc-name-hi{
+  background:rgba(59,130,246,0.15);color:var(--accent);
+  padding:0 3px;border-radius:3px;font-weight:600;
+}
+.td-amount{font-family:'Fira Code',monospace;font-size:13px;font-weight:600;text-align:right;white-space:nowrap}
+.td-amount.sent{color:var(--sent)}
+.td-amount.recv{color:var(--received)}
+.td-score{font-family:'Fira Code',monospace;font-size:10px;color:var(--text-muted)}
+
+/* Raw row toggle */
+.raw-toggle{
+  font-size:10px;color:var(--text-dim);cursor:pointer;
+  text-decoration:underline;display:block;margin-top:4px;
+}
+.raw-toggle:hover{color:var(--text-muted)}
+.raw-row{display:none;font-size:10px;font-family:'Fira Code',monospace;color:var(--text-muted);margin-top:4px;line-height:1.5;word-break:break-all}
+
+/* Net row */
+.net-row{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--surface2);border:1px solid var(--border2);
+  border-radius:var(--radius-sm);padding:14px 18px;margin-top:16px;
+}
+.net-label{font-size:11px;font-family:'Fira Code',monospace;color:var(--text-muted)}
+.net-value{font-size:20px;font-weight:800;letter-spacing:-0.5px}
+.net-value.pos{color:var(--received)}
+.net-value.neg{color:var(--sent)}
+
+/* Export row */
+.export-row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.btn-export{
+  background:var(--surface2);border:1px solid var(--border2);
+  border-radius:8px;padding:9px 16px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;
+  color:var(--text-muted);cursor:pointer;transition:all .2s;
+  display:flex;align-items:center;gap:6px;
+}
+.btn-export:hover{border-color:var(--accent);color:var(--accent)}
+
+/* State boxes */
+.state-box{
+  text-align:center;padding:60px 20px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);
+}
+.state-icon{font-size:44px;display:block;margin-bottom:12px}
+.state-msg{font-size:16px;font-weight:700;margin-bottom:6px}
+.state-sub{font-size:13px;color:var(--text-muted);line-height:1.6}
+
+/* Loading */
+.loading{
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  padding:40px;color:var(--text-muted);font-size:13px;
+  font-family:'Fira Code',monospace;
+}
+.spinner{
+  width:18px;height:18px;border:2px solid var(--border2);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Aliases section */
+.aliases-box{
+  background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.2);
+  border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;
+  font-size:12px;
+}
+.aliases-box strong{color:var(--accent2);font-size:11px;font-family:'Fira Code',monospace;display:block;margin-bottom:6px}
+.alias-pill{
+  display:inline-block;background:rgba(245,158,11,0.1);
+  border:1px solid rgba(245,158,11,0.2);
+  padding:2px 8px;border-radius:4px;margin:2px;
+  font-family:'Fira Code',monospace;font-size:10px;color:var(--accent2);
+}
+
+@media(max-width:680px){
+  .main-panel{grid-template-columns:1fr}
+  .summary-grid{grid-template-columns:1fr 1fr}
+  .header{flex-direction:column;gap:12px;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="brand">
+      <div class="brand-icon">🔍</div>
+      <div class="brand-text">
+        <h1>TxnLookup</h1>
+        <p>Smart Bank Statement Analyzer · v2.0</p>
+      </div>
+    </div>
+    <div class="v-tag">Built for Promise Nwaogaraku</div>
+  </div>
+
+  <!-- CAPABILITY PILLS -->
+  <div class="caps">
+    <div class="cap"><span class="dot"></span>Excel / XLSX</div>
+    <div class="cap"><span class="dot"></span>PDF Statements</div>
+    <div class="cap"><span class="dot"></span>Images (JPG/PNG)</div>
+    <div class="cap"><span class="dot"></span>Word Documents</div>
+    <div class="cap"><span class="dot"></span>OCR Engine</div>
+    <div class="cap"><span class="dot"></span>Fuzzy Name Matching</div>
+    <div class="cap"><span class="dot"></span>Multi-sheet</div>
+    <div class="cap"><span class="dot"></span>Smart Row Parser</div>
+  </div>
+
+  <!-- STEP CARDS -->
+  <div class="main-panel">
+
+    <!-- STEP 1: FILE -->
+    <div class="panel" id="step1Card">
+      <div class="panel-header">
+        <div class="step-badge" id="badge1">1</div>
+        <div>
+          <h3>Upload Statement</h3>
+          <div class="panel-sub">Any format — smart detection</div>
+        </div>
+      </div>
+
+      <div id="dropZone" class="drop-zone">
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tiff,.doc,.docx,.txt"/>
+        <span class="drop-icon">📂</span>
+        <div class="drop-label">
+          <strong>Drop your bank statement here</strong>
+          Click to browse or drag & drop
+        </div>
+        <div class="drop-formats">
+          <span class="fmt-badge">XLSX</span>
+          <span class="fmt-badge">XLS</span>
+          <span class="fmt-badge">CSV</span>
+          <span class="fmt-badge">PDF</span>
+          <span class="fmt-badge">PNG</span>
+          <span class="fmt-badge">JPG</span>
+          <span class="fmt-badge">DOCX</span>
+          <span class="fmt-badge">TXT</span>
+        </div>
+      </div>
+
+      <div id="fileLoaded" style="display:none">
+        <div class="file-loaded">
+          <span class="fi" id="fileIcon">📄</span>
+          <div class="fn">
+            <strong id="fileName">file.xlsx</strong>
+            <span id="fileInfo">Loading…</span>
+          </div>
+          <button class="btn-x" id="clearBtn">✕</button>
+        </div>
+        <div class="proc-bar" id="procBar" style="display:none">
+          <div class="proc-bar-fill" id="procFill"></div>
+        </div>
+        <div class="proc-status" id="procStatus"></div>
+      </div>
+    </div>
+
+    <!-- STEP 2: SEARCH -->
+    <div class="panel" id="step2Card">
+      <div class="panel-header">
+        <div class="step-badge" id="badge2">2</div>
+        <div>
+          <h3>Search by Name</h3>
+          <div class="panel-sub">Fuzzy match — finds similar names too</div>
+        </div>
+      </div>
+
+      <input
+        type="text"
+        id="nameInput"
+        class="search-input"
+        placeholder="e.g.  Faith Matthew  or  faith mat"
+        autocomplete="off"
+        spellcheck="false"
+      />
+
+      <div class="fuzzy-hint">
+        <span class="dot"></span>
+        Smart matching: "Faith Mathew" finds "Faith Matthew", "F. Matthew", etc.
+      </div>
+
+      <div class="threshold-row">
+        <label>Sensitivity</label>
+        <input type="range" id="thresholdSlider" min="40" max="100" value="70" step="5"/>
+        <span class="threshold-val" id="thresholdVal">70%</span>
+      </div>
+
+      <button id="searchBtn" class="btn-search" disabled>
+        <span>🔎</span> Run Lookup
+      </button>
+    </div>
+
+  </div><!-- /main-panel -->
+
+  <!-- RESULTS AREA -->
+  <div id="resultsArea"></div>
+
+</div><!-- /wrap -->
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   TxnLookup v2 — Promise Nwaogaraku
+   Multi-format · OCR · Fuzzy matching · Smart parser
+══════════════════════════════════════════════════════════ */
+(function(){
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ── DOM ────────────────────────────────────────────────────
+const dropZone    = document.getElementById('dropZone');
+const fileInput   = document.getElementById('fileInput');
+const fileLoaded  = document.getElementById('fileLoaded');
+const fileName    = document.getElementById('fileName');
+const fileInfo    = document.getElementById('fileInfo');
+const fileIcon    = document.getElementById('fileIcon');
+const clearBtn    = document.getElementById('clearBtn');
+const procBar     = document.getElementById('procBar');
+const procFill    = document.getElementById('procFill');
+const procStatus  = document.getElementById('procStatus');
+const nameInput   = document.getElementById('nameInput');
+const searchBtn   = document.getElementById('searchBtn');
+const thresholdSlider = document.getElementById('thresholdSlider');
+const thresholdVal    = document.getElementById('thresholdVal');
+const resultsArea = document.getElementById('resultsArea');
+const step1Card   = document.getElementById('step1Card');
+const step2Card   = document.getElementById('step2Card');
+const badge1      = document.getElementById('badge1');
+const badge2      = document.getElementById('badge2');
+
+// ── THRESHOLD ──────────────────────────────────────────────
+thresholdSlider.addEventListener('input', () => {
+  thresholdVal.textContent = thresholdSlider.value + '%';
+});
+
+// ── DRAG & DROP ────────────────────────────────────────────
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+clearBtn.addEventListener('click', () => resetFile());
+
+// ── NAME INPUT ─────────────────────────────────────────────
+nameInput.addEventListener('input', updateSearchBtn);
+nameInput.addEventListener('keydown', e => { if (e.key==='Enter' && !searchBtn.disabled) runSearch(); });
+searchBtn.addEventListener('click', runSearch);
+
+function updateSearchBtn() {
+  const ok = fileReady && nameInput.value.trim().length >= 2;
+  searchBtn.disabled = !ok;
+  step2Card.classList.toggle('active', ok);
+  badge2.textContent = ok ? '\u2713' : '2';
+}
+
+function getIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  return {xlsx:'\ud83d\udcca',xls:'\ud83d\udcca',csv:'\ud83d\udccb',pdf:'\ud83d\udcd5',
+          png:'\ud83d\uddbc',jpg:'\ud83d\uddbc',jpeg:'\ud83d\uddbc',webp:'\ud83d\uddbc',
+          bmp:'\ud83d\uddbc',tiff:'\ud83d\uddbc',doc:'\ud83d\udcdd',docx:'\ud83d\udcdd',
+          txt:'\ud83d\udcc4'}[ext] || '\ud83d\udcc4';
+}
+
+function setProgress(pct, msg) {
+  procBar.style.display = 'block';
+  procFill.style.width = pct + '%';
+  procStatus.textContent = msg;
+}
+function clearProgress() { procBar.style.display='none'; procStatus.textContent=''; }
+
+// ── FILE PROCESSING ROUTER ─────────────────────────────────
+async function processFile(file) {
+  resetFile(true);
+  dropZone.style.display = 'none';
+  fileLoaded.style.display = 'block';
+  fileName.textContent = file.name;
+  fileIcon.textContent = getIcon(file.name);
+  fileInfo.textContent = 'Processing…';
+  step1Card.classList.add('active');
+  badge1.textContent = '\u23f3';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  try {
+    if (['xlsx','xls'].includes(ext))                          await readExcel(file);
+    else if (ext==='csv')                                      await readCSV(file);
+    else if (ext==='pdf')                                      await readPDF(file);
+    else if (['png','jpg','jpeg','webp','bmp','tiff'].includes(ext)) await readImage(file);
+    else if (['doc','docx'].includes(ext))                     await readWord(file);
+    else if (ext==='txt')                                      await readText(file);
+    else throw new Error('Unsupported file type: .' + ext);
+
+    detectAllSchemas();
+    const rowCount = allRows.length;
+    fileInfo.textContent = `${rowCount} rows \u00b7 ${schemaSummary()} \u00b7 Ready`;
+    fileReady = true;
+    badge1.textContent = '\u2713';
+    clearProgress();
+    updateSearchBtn();
+  } catch(err) {
+    fileInfo.textContent = '\u26a0 ' + err.message;
+    badge1.textContent = '!';
+    clearProgress();
+  }
+}
+
+function resetFile(keepUI) {
+  allRows = []; allText = ''; fileReady = false;
+  sheetSchemas = {}; defaultSchema = null;
+  fileInput.value = '';
+  resultsArea.innerHTML = '';
+  if (!keepUI) {
+    dropZone.style.display = '';
+    fileLoaded.style.display = 'none';
+    step1Card.classList.remove('active');
+  }
+  badge1.textContent = '1'; badge2.textContent = '2';
+  step2Card.classList.remove('active');
+  searchBtn.disabled = true;
+  clearProgress();
+}
+
+// ── READERS ────────────────────────────────────────────────
+async function readExcel(file) {
+  setProgress(20, 'Reading Excel file…');
+  const buf = await file.arrayBuffer();
+  setProgress(50, 'Parsing sheets…');
+  const wb = XLSX.read(buf, {type:'array', cellDates:true, raw:false});
+  wb.SheetNames.forEach(sheetName => {
+    const ws = wb.Sheets[sheetName];
+    const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false});
+    raw.forEach(row => {
+      if (!row || !row.some(c => String(c||'').trim())) return;
+      const cells = row.map(c => String(c===null||c===undefined?'':c).trim());
+      if (cells.join('').length > 2) allRows.push({cells, sheet:sheetName, source:'excel'});
+    });
+  });
+  allText = allRows.map(r=>r.cells.join(' ')).join('\n');
+  setProgress(90, `Loaded ${allRows.length} rows from ${wb.SheetNames.length} sheet(s)…`);
+}
+
+async function readCSV(file) {
+  setProgress(20, 'Reading CSV…');
+  const text = await file.text();
+  setProgress(60, 'Parsing rows…');
+  text.split(/\r?\n/).forEach(line => {
+    if (!line.trim()) return;
+    const cells = (line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g)||[line]).map(c=>c.replace(/^"|"$/g,'').trim());
+    if (cells.join('').length > 2) allRows.push({cells, sheet:'CSV', source:'csv'});
+  });
+  allText = allRows.map(r=>r.cells.join(' ')).join('\n');
+  setProgress(90, `Loaded ${allRows.length} rows`);
+}
+
+async function readPDF(file) {
+  setProgress(10, 'Loading PDF…');
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  const n = pdf.numPages;
+  let fullText = '';
+
+  for (let i=1; i<=n; i++) {
+    setProgress(10+Math.round(70*i/n), `Extracting page ${i}/${n}…`);
+    const page   = await pdf.getPage(i);
+    const content = await page.getTextContent();
+
+    // ── Step 1: Bucket items by Y position (same row = within 4pt of each other)
+    const items = content.items.filter(it => it.str && it.str.trim());
+    const rows  = {};   // key = rounded Y
+    items.forEach(it => {
+      const y = Math.round(it.transform[5] / 4) * 4;
+      if (!rows[y]) rows[y] = [];
+      rows[y].push({ x: it.transform[4], w: it.width || 0, text: it.str.trim() });
+    });
+
+    // ── Step 2: Sort rows top-to-bottom (PDF Y is bottom-up so descending)
+    const sortedYs = Object.keys(rows).map(Number).sort((a,b) => b - a);
+
+    // ── Step 3: For each row, cluster tokens into columns by X gaps
+    //    Then push as a proper cells array so parseRow can work column-aware
+    sortedYs.forEach(y => {
+      const tokens = rows[y].sort((a,b) => a.x - b.x);
+
+      // Build columns: merge tokens that are close together (gap < 15pt = same cell)
+      const colGroups = [];
+      let cur = null;
+      tokens.forEach(tok => {
+        if (!cur) { cur = { x: tok.x, text: tok.text }; return; }
+        const gap = tok.x - (cur.x + (cur.w || cur.text.length * 5));
+        if (gap < 18) {   // same cell — concatenate with space
+          cur.text += ' ' + tok.text;
+        } else {           // new cell
+          colGroups.push(cur.text.trim());
+          cur = { x: tok.x, w: tok.w, text: tok.text };
+        }
+      });
+      if (cur) colGroups.push(cur.text.trim());
+
+      const cells = colGroups.filter(c => c.length > 0);
+      const lineText = cells.join('  ');
+      if (!lineText.trim()) return;
+
+      fullText += lineText + '\n';
+      allRows.push({ cells, sheet: `Page ${i}`, source: 'pdf' });
+    });
+  }
+
+  allText = fullText;
+  setProgress(90, 'PDF extracted');
+  detectAllSchemas();   // run schema detection now before OCR fallback
+
+  if (allRows.filter(r => r.cells.join('').length > 10).length < 5) {
+    setProgress(92, 'Low text — trying OCR…');
+    await ocrPDF(pdf, n);
+  }
+}
+
+async function ocrPDF(pdf, n) {
+  const worker = await Tesseract.createWorker('eng',1,{logger:m=>{
+    if(m.status==='recognizing text') setProgress(92+Math.round(6*m.progress),`OCR ${Math.round(m.progress*100)}%`);
+  }});
+  for (let i=1;i<=Math.min(n,10);i++) {
+    const page = await pdf.getPage(i);
+    const vp = page.getViewport({scale:2});
+    const canvas = document.createElement('canvas');
+    canvas.width=vp.width; canvas.height=vp.height;
+    await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+    const blob = await new Promise(res=>canvas.toBlob(res,'image/png'));
+    const {data} = await worker.recognize(blob);
+    allText += data.text + '\n';
+    parseTextIntoRows(data.text, `OCR Page ${i}`);
+  }
+  await worker.terminate();
+}
+
+async function readImage(file) {
+  setProgress(10, 'Initializing OCR…');
+  const worker = await Tesseract.createWorker('eng',1,{logger:m=>{
+    if(m.status==='recognizing text') setProgress(20+Math.round(70*m.progress),`OCR: ${Math.round(m.progress*100)}%`);
+  }});
+  const {data} = await worker.recognize(file);
+  await worker.terminate();
+  allText = data.text;
+  parseTextIntoRows(data.text, 'Image-OCR');
+  setProgress(95, 'OCR complete');
+}
+
+async function readWord(file) {
+  setProgress(20, 'Reading Word document…');
+  const buf = await file.arrayBuffer();
+  setProgress(50, 'Extracting content…');
+  const result = await mammoth.extractRawText({arrayBuffer:buf});
+  allText = result.value;
+  parseTextIntoRows(allText, 'Word');
+  setProgress(90, 'Word processed');
+}
+
+async function readText(file) {
+  setProgress(30, 'Reading text…');
+  allText = await file.text();
+  parseTextIntoRows(allText, 'TXT');
+  setProgress(90, 'Done');
+}
+
+function parseTextIntoRows(text, source) {
+  text.split(/\r?\n/).forEach(line => {
+    line = line.trim();
+    if (!line || line.length < 4) return;
+    let cells;
+    if (line.includes('\t'))          cells = line.split('\t').map(c=>c.trim()).filter(Boolean);
+    else if (/\s{2,}/.test(line))     cells = line.split(/\s{2,}/).map(c=>c.trim()).filter(Boolean);
+    else if (line.includes('|'))       cells = line.split('|').map(c=>c.trim()).filter(Boolean);
+    else                               cells = [line];
+    if (cells.join('').length > 3) allRows.push({cells, sheet:source, source:source.toLowerCase()});
+  });
+}
+
+// ── FUZZY SEARCH ENGINE ────────────────────────────────────
+function normalize(s) {
+  return String(s||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function levDist(a,b) {
+  const m=a.length, n=b.length;
+  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>j===0?i:0));
+  for(let j=1;j<=n;j++) dp[0][j]=j;
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+    dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+function similarity(a,b) {
+  a=normalize(a); b=normalize(b);
+  if (!a||!b) return 0;
+  if (a===b) return 100;
+  if (a.includes(b)||b.includes(a)) return 90;
+  const ta=a.split(' '), tb=b.split(' ');
+  let tokenScore=0;
+  ta.forEach(wa=>tb.forEach(wb=>{
+    const len=Math.max(wa.length,wb.length);
+    if(len===0) return;
+    const s=(1-levDist(wa,wb)/len)*100;
+    if(s>tokenScore) tokenScore=s;
+  }));
+  const maxLen=Math.max(a.length,b.length);
+  const fullScore=maxLen===0?0:(1-levDist(a,b)/maxLen)*100;
+  return Math.max(tokenScore*0.8, fullScore);
+}
+
+function rowMatchScore(row, queryTerms) {
+  const rowText=normalize(row.cells.join(' '));
+  let bestScore=0;
+  const qFull=queryTerms.join(' ');
+  if(rowText.includes(qFull)) return 100;
+  queryTerms.forEach(qt=>{
+    const words=rowText.split(' ');
+    words.forEach(w=>{ const s=similarity(qt,w); if(s>bestScore) bestScore=s; });
+    for(let i=0;i<words.length-1;i++){
+      const combo=words[i]+' '+words[i+1];
+      const s=similarity(qt,combo); if(s>bestScore) bestScore=s;
+    }
+  });
+  if(queryTerms.length>=2){
+    let allMatch=true;
+    queryTerms.forEach(qt=>{
+      if(!rowText.split(' ').some(w=>similarity(qt,w)>=60)) allMatch=false;
+    });
+    if(allMatch) bestScore=Math.max(bestScore,88);
+  }
+  return bestScore;
+}
+
+function findNameVariants(hits) {
+  const found=new Set();
+  hits.forEach(h=>{
+    const matches=(h.description||'').match(/[A-Z][a-z]+(?: [A-Z][a-z]+)*/g)||[];
+    matches.forEach(m=>{ if(m.split(' ').length>=2) found.add(m); });
+  });
+  return [...found];
+}
+
+
+// ── STATE ──────────────────────────────────────────────────
+let allRows     = [];   // [{cells:[], sheet:'', source:''}]
+let allText     = '';
+let fileReady   = false;
+let currentHits = [];
+let currentQuery = '';
+let sheetSchemas = {};   // sheetName → learned schema
+let defaultSchema = null;
+
+// ════════════════════════════════════════════════════════════
+//  SCHEMA ENGINE
+//  Reads every sheet's header row and locks the exact column
+//  indices for Debit, Credit, Balance, Description, Date.
+//  Runs ONCE after a file loads. parseRow uses these positions
+//  and NEVER touches the balance column as an amount.
+// ════════════════════════════════════════════════════════════
+
+const SCHEMA_EMPTY = () => ({
+  dateIdx:-1, valueDateIdx:-1, descIdx:-1,
+  debitIdx:-1, creditIdx:-1, balanceIdx:-1,
+  amountIdx:-1, drCrFlagIdx:-1,
+  channelIdx:-1, refIdx:-1,
+  headerRow:-1, confident:false
+});
+
+function classifyHeader(txt) {
+  const t = String(txt||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').trim();
+  // balance first — must come before credit/debit
+  if (/\bbal(ance)?\b/.test(t) && !/money/.test(t))                          return 'balance';
+  // PalmPay / single-signed-column: "Money In (NGN)", "Money Out (NGN)"
+  if (/money\s*in|cash\s*in|money\s*received/.test(t))                      return 'credit';
+  if (/money\s*out|cash\s*out|money\s*sent/.test(t))                        return 'debit';
+  // Standard debit / credit
+  if (/\bdebit\b|\bdr\b|\bwithdr(aw(al)?)?\b|\bexpense\b/.test(t))       return 'debit';
+  if (/\bcredit\b|\bcr\b|\bdeposit\b|\binflow\b|\breceipt\b/.test(t))   return 'credit';
+  // Value date before generic value/amount
+  if (/\bvalue\s*date\b/.test(t))                                            return 'valuedate';
+  if (/\bamount\b/.test(t) && !/bal/.test(t))                                return 'amount';
+  if (/\btype\b|\bdr\s*\/\s*cr\b|\bdc\b/.test(t))                       return 'drcrflag';
+  // Description — "Transaction Detail" also counts
+  if (/\bdesc(ription)?\b|\bnarr(ation)?\b|\bparticular\b|\bremarks?\b|\bdetails?\b|transaction\s*detail/.test(t)) return 'desc';
+  if (/\bdate\b/.test(t) && !/value/.test(t))                                return 'date';
+  if (/\bchannel\b|\bmode\b/.test(t))                                       return 'channel';
+  if (/\bref(erence)?\b|transaction\s*id|txn\s*id/.test(t))                return 'ref';
+  return null;
+}
+
+function detectSchemaForSheet(sheetName) {
+  const sc = SCHEMA_EMPTY();
+  const sheetRows = allRows.filter(r => r.sheet === sheetName).slice(0, 30);
+
+  for (let ri = 0; ri < sheetRows.length; ri++) {
+    const cells = sheetRows[ri].cells;
+    const first  = String(cells[0]||'').toLowerCase().trim();
+
+    // Hard-skip known meta/summary rows that contain financial keywords
+    // but are NOT the column header row
+    if (/opening\s*bal|closing\s*bal|total\s*debit|total\s*credit|debit\s*count|credit\s*count|available\s*bal|ledger\s*bal|statement\s*(period|of)|account\s*(name|type|number|holder)|date\s*printed/i.test(cells.join(' '))) continue;
+
+    const roles = cells.map(c => classifyHeader(c));
+    const hasFinancial = roles.includes('debit') || roles.includes('credit') || roles.includes('amount');
+    if (!hasFinancial) continue;
+
+    // A real column header row must ALSO have a date or description column
+    // (meta summary rows won't have these alongside debit/credit labels)
+    const hasDateOrDesc = roles.includes('date') || roles.includes('valuedate') || roles.includes('desc');
+    if (!hasDateOrDesc) continue;
+
+    // Must have at least 4 columns with recognizable roles for it to be a real header
+    const recognizedCount = roles.filter(r => r !== null).length;
+    if (recognizedCount < 3) continue;
+
+    roles.forEach((role, ci) => {
+      if (!role) return;
+      if (role==='date'     && sc.dateIdx      <0) sc.dateIdx      = ci;
+      if (role==='valuedate'&& sc.valueDateIdx <0) sc.valueDateIdx = ci;
+      if (role==='desc'     && sc.descIdx      <0) sc.descIdx      = ci;
+      if (role==='debit'    && sc.debitIdx     <0) sc.debitIdx     = ci;
+      if (role==='credit'   && sc.creditIdx    <0) sc.creditIdx    = ci;
+      if (role==='balance'  && sc.balanceIdx   <0) sc.balanceIdx   = ci;
+      if (role==='amount'   && sc.amountIdx    <0) sc.amountIdx    = ci;
+      if (role==='drcrflag' && sc.drCrFlagIdx  <0) sc.drCrFlagIdx  = ci;
+      if (role==='channel'  && sc.channelIdx   <0) sc.channelIdx   = ci;
+      if (role==='ref'      && sc.refIdx       <0) sc.refIdx       = ci;
+    });
+    sc.headerRow = ri;
+    sc.confident = (sc.debitIdx >= 0 || sc.creditIdx >= 0 || sc.amountIdx >= 0);
+    break;
+  }
+  return sc;
+}
+
+function detectAllSchemas() {
+  sheetSchemas = {};
+  const sheets = [...new Set(allRows.map(r => r.sheet))];
+  sheets.forEach(sh => { sheetSchemas[sh] = detectSchemaForSheet(sh); });
+  defaultSchema = Object.values(sheetSchemas).find(s => s.confident) || null;
+}
+
+function schemaSummary() {
+  const parts = [];
+  Object.entries(sheetSchemas).forEach(([sh, sc]) => {
+    if (!sc.confident) { parts.push(`${sh}:heuristic`); return; }
+    const c = [];
+    if (sc.debitIdx   >= 0) c.push(`Dr=col${sc.debitIdx+1}`);
+    if (sc.creditIdx  >= 0) c.push(`Cr=col${sc.creditIdx+1}`);
+    if (sc.balanceIdx >= 0) c.push(`Bal=col${sc.balanceIdx+1}(excluded)`);
+    parts.push(`${sh}: ${c.join(' ')}`);
+  });
+  return parts.join(' | ') || 'heuristic';
+}
+
+// ════════════════════════════════════════════════════════════
+//  DATE PARSER
+// ════════════════════════════════════════════════════════════
+const MONTHS_FULL  = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
+const MONTHS_SHORT = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+function parseDate(raw) {
+  const s = String(raw||'').trim();
+  if (!s || s.length < 5) return null;
+
+  let day, monIdx, year, time = '';
+
+  // "19 May 2025 15:28:28" or "19-May-2025"
+  const p1 = s.match(/(\d{1,2})[\s\-\/](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s\-\/](\d{4})(?:[\sT](\d{2}:\d{2}(?::\d{2})?))?/i);
+  if (p1) {
+    day=+p1[1]; monIdx=MONTHS_SHORT.indexOf(p1[2].toLowerCase().slice(0,3)); year=+p1[3]; time=p1[4]||'';
+    return {day, mon:MONTHS_FULL[monIdx], year, time, dateObj:new Date(year,monIdx,day)};
+  }
+  // ISO "2025-05-19"
+  const p2 = s.match(/(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})(?:[\sT](\d{2}:\d{2}(?::\d{2})?))?/);
+  if (p2) {
+    year=+p2[1]; monIdx=+p2[2]-1; day=+p2[3]; time=p2[4]||'';
+    if(monIdx>=0&&monIdx<12) return {day, mon:MONTHS_FULL[monIdx], year, time, dateObj:new Date(year,monIdx,day)};
+  }
+  // DD/MM/YYYY
+  const p3 = s.match(/(\d{1,2})[\-\/\.](\d{1,2})[\-\/\.](\d{4})(?:[\s](\d{2}:\d{2}(?::\d{2})?))?/);
+  if (p3) {
+    day=+p3[1]; monIdx=+p3[2]-1; year=+p3[3]; time=p3[4]||'';
+    if(monIdx<0||monIdx>11){monIdx=+p3[1]-1; day=+p3[2];}
+    if(monIdx>=0&&monIdx<12) return {day, mon:MONTHS_FULL[monIdx]||'', year, time, dateObj:new Date(year,monIdx,day)};
+  }
+  // Excel serial
+  const serial = parseFloat(s);
+  if (!isNaN(serial) && serial > 40000 && serial < 60000) {
+    const d = new Date(Math.round((serial-25569)*86400*1000));
+    return {day:d.getDate(), mon:MONTHS_FULL[d.getMonth()], year:d.getFullYear(), time:'', dateObj:d};
+  }
+  return null;
+}
+
+function fmtDate(p) {
+  return p ? `${p.day} ${p.mon} ${p.year}` : '';
+}
+
+// ════════════════════════════════════════════════════════════
+//  NUMBER HELPERS
+// ════════════════════════════════════════════════════════════
+function toNum(raw) {
+  if (raw===null||raw===undefined) return NaN;
+  const s = String(raw).replace(/[\u20a6,\s]/g,'').trim(); // ₦ = \u20a6
+  if (/^[-\u2013\u2014]{1,3}$/.test(s)||s===''||s.toLowerCase()==='nil') return 0;
+  return parseFloat(s);
+}
+
+function isDash(raw) {
+  const s = String(raw||'').replace(/[\u20a6,\s]/g,'').trim();
+  return /^[-\u2013\u2014]{1,3}$/.test(s) || s==='' || s==='0' || s==='0.00';
+}
+
+function isAmt(n) { return !isNaN(n) && n > 0; }
+
+// Extract signed amount: returns {val, sign} for "+40000.00" or "-43050.00"
+// Returns null if not a signed amount string
+function parseSignedAmount(raw) {
+  const s = String(raw||'').replace(/[\u20a6,\s]/g,'').trim();
+  if (/^[+]([\d]+(?:\.[\d]{1,2})?)$/.test(s)) return { val: parseFloat(s.slice(1)), sign: '+' };
+  if (/^[-]([\d]+(?:\.[\d]{1,2})?)$/.test(s)) return { val: parseFloat(s.slice(1)), sign: '-' };
+  return null;
+}
+
+// ════════════════════════════════════════════════════════════
+//  DESCRIPTION KEYWORD SIGNALS
+// ════════════════════════════════════════════════════════════
+const RX_DEBIT  = /\b(debit|\bdr\b|withdraw|transfer\s*to|payment|airtime|data|bet(ting)?|purchase|charge|fee|levy|buy|spend|auto[-\s]?save|electronic\s*money|owealth\s*withdrawal)\b/i;
+const RX_CREDIT = /\b(credit|\bcr\b|deposit|received|transfer\s*from|inflow|reversal|refund|interest\s*earned|owealth\s*interest|salary|dividend|reward)\b/i;
+
+// ════════════════════════════════════════════════════════════
+//  ROW PARSER
+//
+//  Priority order for accuracy:
+//  1. Schema path   — uses exact col indices; balance col NEVER touched
+//  2. Dash pattern  — OPay/GTBank/Access "--|amount" or "amount|--"
+//  3. DR/CR inline  — "DR 5,000" embedded in description text
+//  4. Positional    — last numeric = balance (excluded), remainder split
+//  Direction is derived from debit/credit values, not keywords alone.
+// ════════════════════════════════════════════════════════════
+
+function parseRow(cells, sheetName) {
+  const clean = cells.map(c => String(c===null||c===undefined?'':c).trim());
+  const full   = clean.join(' ');
+  const lower  = full.toLowerCase();
+
+  // Hard skip header / meta rows
+  if (full.length < 4) return null;
+  if (/account\s*(number|name|type|holder|statement)|opening\s*bal|closing\s*bal|statement\s*(period|of|for)|available\s*bal|ledger\s*bal|date\s*printed/i.test(lower)) return null;
+  if (/trans\.?\s*date|value\s*date/i.test(clean[0]||'') && /debit|credit/i.test(full)) return null;
+
+  const sc = sheetSchemas[sheetName] || defaultSchema;
+
+  // ── Date ─────────────────────────────────────────────────
+  let parsedDate = null;
+  if (sc && sc.dateIdx >= 0)       parsedDate = parseDate(clean[sc.dateIdx]);
+  if (!parsedDate && sc && sc.valueDateIdx >= 0) parsedDate = parseDate(clean[sc.valueDateIdx]);
+  if (!parsedDate) { for (const c of clean) { parsedDate = parseDate(c); if (parsedDate) break; } }
+  const dateStr = fmtDate(parsedDate);
+  const time    = parsedDate?.time || '';
+
+  // ── Description ──────────────────────────────────────────
+  let description = '';
+  if (sc && sc.descIdx >= 0 && clean[sc.descIdx] && clean[sc.descIdx].length > 2) {
+    description = clean[sc.descIdx];
+  } else {
+    const cands = clean.filter(c => c.length>4 && !isAmt(toNum(c)) && !isDash(c) && !parseDate(c));
+    cands.sort((a,b)=>b.length-a.length);
+    description = cands[0] || full.slice(0,160);
+  }
+
+  // ── Amounts ───────────────────────────────────────────────
+  let debit=0, credit=0;
+
+  // ── PATH 0: Signed-amount format (+/-) — PalmPay, single-amount col PDFs ─
+  // Detect if any cell looks like "+40000.00" or "-43050.00"
+  // Works both with schema (Money In / Money Out cols) and without
+  {
+    let signedFound = false;
+
+    // Schema-guided signed detection (PalmPay: MoneyIn col=credit, MoneyOut col=debit)
+    if (sc && sc.confident && sc.creditIdx >= 0 && sc.debitIdx >= 0) {
+      const inRaw  = sc.creditIdx < clean.length ? clean[sc.creditIdx] : '';
+      const outRaw = sc.debitIdx  < clean.length ? clean[sc.debitIdx]  : '';
+      const inSgn  = parseSignedAmount(inRaw);
+      const outSgn = parseSignedAmount(outRaw);
+      // PalmPay: Money In col has "+N", Money Out col has "-N" or empty
+      if (inSgn && inSgn.sign === '+' && (!outSgn || outSgn.val === 0)) {
+        credit = inSgn.val; signedFound = true;
+      } else if (outSgn && outSgn.sign === '-' && (!inSgn || inSgn.val === 0)) {
+        debit = outSgn.val; signedFound = true;
+      } else if (inSgn && outSgn) {
+        // Both filled — use sign
+        if (inSgn.sign === '+')  credit = inSgn.val;
+        if (outSgn.sign === '-') debit  = outSgn.val;
+        signedFound = true;
+      }
+    }
+
+    // Schemaless signed detection — scan ALL cells for +N or -N pattern
+    if (!signedFound) {
+      clean.forEach(c => {
+        const sg = parseSignedAmount(c);
+        if (!sg) return;
+        if (sg.sign === '+' && credit === 0) credit = sg.val;
+        if (sg.sign === '-' && debit  === 0) debit  = sg.val;
+        signedFound = true;
+      });
+    }
+
+    if (signedFound && (debit > 0 || credit > 0)) {
+      // Direction is unambiguous from sign — skip all other paths
+      if      (credit > 0 && debit === 0) direction = 'RECEIVED';
+      else if (debit  > 0 && credit === 0) direction = 'SENT';
+      else if (credit > 0 && debit  > 0)  direction = credit >= debit ? 'RECEIVED' : 'SENT';
+      if (!dateStr && !description && debit===0 && credit===0) return null;
+      return { date:dateStr, dateObj:parsedDate?.dateObj||null, time, description, debit, credit, direction };
+    }
+  }
+
+  // ── PATH 1: Confident schema (has debitIdx AND/OR creditIdx) ─
+  if (sc && sc.confident && (sc.debitIdx >= 0 || sc.creditIdx >= 0)) {
+
+    if (sc.debitIdx >= 0 && sc.debitIdx < clean.length) {
+      const v = toNum(clean[sc.debitIdx]);
+      // Sanity guard: reject if this index is also the balance index
+      if (isAmt(v) && sc.debitIdx !== sc.balanceIdx) debit = v;
+    }
+    if (sc.creditIdx >= 0 && sc.creditIdx < clean.length) {
+      const v = toNum(clean[sc.creditIdx]);
+      if (isAmt(v) && sc.creditIdx !== sc.balanceIdx) credit = v;
+    }
+    // Both filled = conflict: use dash to resolve.
+    // In OPay format: if debit col has '--' → credit only; if credit col has '--' → debit only.
+    if (debit > 0 && credit > 0) {
+      const debitRaw  = sc.debitIdx  >= 0 ? clean[sc.debitIdx]  : '';
+      const creditRaw = sc.creditIdx >= 0 ? clean[sc.creditIdx] : '';
+      if (isDash(debitRaw))  debit  = 0;
+      if (isDash(creditRaw)) credit = 0;
+      // Still both? Use description keyword as last resort
+      if (debit > 0 && credit > 0) {
+        if (RX_DEBIT.test(description))       credit = 0;
+        else if (RX_CREDIT.test(description)) debit  = 0;
+        else                                   credit = 0; // default to debit
+      }
+    }
+  }
+
+  // ── PATH 2: Single amount column ──────────────────────────
+  else if (sc && sc.amountIdx >= 0) {
+    const v = toNum(clean[sc.amountIdx]);
+    if (isAmt(v)) {
+      if (sc.drCrFlagIdx >= 0) {
+        const flag = String(clean[sc.drCrFlagIdx]||'').toUpperCase();
+        if (flag.includes('DR')||flag.includes('DEBIT'))       debit  = v;
+        else if (flag.includes('CR')||flag.includes('CREDIT')) credit = v;
+      }
+      if (!debit && !credit) {
+        if (RX_CREDIT.test(description)) credit = v;
+        else                             debit  = v;
+      }
+    }
+  }
+
+  // ── PATH 3: Heuristic (OCR / plain text / unknown layout) ─
+  else {
+    const nums = clean
+      .map((c,i)=>({i, v:toNum(c), raw:c}))
+      .filter(x => isAmt(x.v));
+
+    // Identify balance col: rightmost numeric, or schema hint
+    let balIdx = (sc && sc.balanceIdx >= 0) ? sc.balanceIdx
+               : (nums.length > 0 ? nums[nums.length-1].i : -1);
+
+    // For OPay/GTBank layout: if the LAST three numerics look like
+    // debit/credit/balance, balance is the very last; exclude it.
+    const nonBal = nums.filter(x => x.i !== balIdx);
+
+    // Strategy A — dash pattern
+    const dashes = clean.map((c,i)=>({i})).filter((_,i)=>isDash(clean[i]) && !/^\d/.test(clean[i]));
+    let dashMatched = false;
+    for (const di of dashes) {
+      for (const ni of nonBal) {
+        if (ni.i === di.i - 1) { debit  = ni.v; dashMatched = true; }
+        if (ni.i === di.i + 1) { credit = ni.v; dashMatched = true; }
+      }
+    }
+
+    // Strategy B — DR/CR embedded text
+    if (!dashMatched && debit===0 && credit===0) {
+      const drM = full.match(/\bDR\s*[\u20a6]?(\d[\d,]*(?:\.\d{1,2})?)/i);
+      const crM = full.match(/\bCR\s*[\u20a6]?(\d[\d,]*(?:\.\d{1,2})?)/i);
+      if (drM) debit  = toNum(drM[1]);
+      if (crM) credit = toNum(crM[1]);
+    }
+
+    // Strategy C — positional
+    if (debit===0 && credit===0) {
+      if (nonBal.length >= 2) {
+        // second-to-last = debit col, last-before-balance = credit col
+        // then zero out one side based on description
+        const mayD = nonBal[nonBal.length-2].v;
+        const mayC = nonBal[nonBal.length-1].v;
+        if (RX_CREDIT.test(description))      { credit=mayC; }
+        else if (RX_DEBIT.test(description))  { debit=mayD;  }
+        else                                  { debit=mayD;  } // default outflow
+      } else if (nonBal.length===1) {
+        const v = nonBal[0].v;
+        if (RX_CREDIT.test(description)) credit=v; else debit=v;
+      }
+    }
+  }
+
+  // ── Direction: derived from final debit/credit values ─────
+  let direction = '';
+  if      (debit>0  && credit===0) direction = 'SENT';
+  else if (credit>0 && debit===0)  direction = 'RECEIVED';
+  else if (debit>0  && credit>0)   {
+    // Resolve conflict with description as last resort
+    if      (RX_DEBIT.test(description))  { credit=0; direction='SENT';     }
+    else if (RX_CREDIT.test(description)) { debit=0;  direction='RECEIVED'; }
+    else                                  { credit=0; direction='SENT';     }
+  }
+
+  if (!dateStr && !description && debit===0 && credit===0) return null;
+
+  return { date:dateStr, dateObj:parsedDate?.dateObj||null, time, description, debit, credit, direction };
+}
+
+// ══════════════════════════════════════════════════════════
+//  SEARCH
+// ══════════════════════════════════════════════════════════
+function runSearch() {
+  const query = nameInput.value.trim();
+  if (!query || !fileReady) return;
+  currentQuery = query;
+
+  const threshold = parseInt(thresholdSlider.value);
+  resultsArea.innerHTML = `<div class="loading"><div class="spinner"></div>Scanning ${allRows.length} rows with fuzzy matching…</div>`;
+
+  setTimeout(() => {
+    const queryTerms = normalize(query).split(' ').filter(Boolean);
+    const hits = [];
+    const seenTexts = new Set();
+
+    allRows.forEach(row => {
+      const rowText = row.cells.join(' ');
+      const score = rowMatchScore(row, queryTerms);
+      if (score < threshold) return;
+
+      // Dedup: skip rows with nearly identical text
+      const key = normalize(rowText).slice(0, 80);
+      if (seenTexts.has(key)) return;
+      seenTexts.add(key);
+
+      const parsed = parseRow(row.cells, row.sheet);
+      if (parsed) {
+        hits.push({ ...parsed, raw: row.cells, sheet: row.sheet, score: Math.round(score) });
+      } else {
+        // Include unstructured match with raw text
+        hits.push({
+          date:'', time:'', description: rowText.slice(0,200),
+          debit:0, credit:0, direction:'',
+          raw: row.cells, sheet: row.sheet, score: Math.round(score), unstructured:true
+        });
+      }
+    });
+
+    // Sort: exact/high score first, then chronological
+    hits.sort((a,b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // Secondary: sort by date descending (most recent first)
+      if (a.dateObj && b.dateObj) return b.dateObj - a.dateObj;
+      return 0;
+    });
+
+    currentHits = hits;
+    renderResults(hits, query);
+  }, 30);
+}
+
+// ══════════════════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════════════════
+function fmt(n) {
+  if (!n || n===0) return '—';
+  return '₦' + parseFloat(n).toLocaleString('en-NG',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Highlight query tokens in description text
+function highlight(text, queryTerms) {
+  let out = esc(text);
+  queryTerms.forEach(qt => {
+    if (qt.length < 2) return;
+    const re = new RegExp(`(${qt.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+    out = out.replace(re, '<span class="desc-name-hi">$1</span>');
+  });
+  return out;
+}
+
+function renderResults(hits, queryText) {
+  const queryTerms = normalize(queryText).split(' ').filter(Boolean);
+
+  if (hits.length === 0) {
+    resultsArea.innerHTML = `
+      <hr class="divider"/>
+      <div class="state-box">
+        <span class="state-icon">🔍</span>
+        <div class="state-msg">No matches found</div>
+        <div class="state-sub">
+          No rows matched "<strong>${esc(queryText)}</strong>"<br>
+          Try lowering the sensitivity slider or check the name spelling.<br>
+          Current threshold: ${thresholdSlider.value}%
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Compute totals (skip unstructured)
+  let totalSent = 0, totalRecv = 0;
+  hits.forEach(h => {
+    if (h.unstructured) return;
+    totalSent += h.debit || 0;
+    totalRecv += h.credit || 0;
+  });
+  const net = totalRecv - totalSent;
+  const fuzzyCount = hits.filter(h=>h.score < 100).length;
+
+  // Variants
+  const variants = findNameVariants(hits).filter(v => v.toLowerCase() !== queryText.toLowerCase());
+
+  // Table rows
+  const rows = hits.map((h, i) => {
+    const isSent = h.direction==='SENT' || (h.debit>0 && h.credit===0);
+    const isRecv = h.direction==='RECEIVED' || (h.credit>0 && h.debit===0);
+    const amount = isSent ? h.debit : h.credit;
+    const scoreColor = h.score >= 95 ? '#10b981' : h.score >= 75 ? '#f59e0b' : '#ef4444';
+
+    // Format date for display: split into day, "Month Year", time
+    let dateDisplay = '';
+    if (h.date) {
+      // h.date is already "19 May 2025" — split into parts for styled display
+      const parts = h.date.split(' '); // [day, month, year]
+      if (parts.length === 3) {
+        dateDisplay = `<span class="td-day">${esc(parts[0])}</span><span class="td-mon">${esc(parts[1])} ${esc(parts[2])}</span>`;
+      } else {
+        dateDisplay = `<span class="td-day">${esc(h.date)}</span>`;
+      }
+    }
+
+    return `
+      <tr>
+        <td class="td-date">
+          ${dateDisplay || '<span style="color:var(--text-dim)">—</span>'}
+          ${h.time ? `<div class="td-time">${esc(h.time)}</div>` : ''}
+        </td>
+        <td>
+          ${isSent  ? '<span class="badge sent">↑ SENT</span>' :
+            isRecv  ? '<span class="badge recv">↓ RECV</span>' :
+            h.unstructured ? '<span class="badge" style="background:var(--surface3);border-color:var(--border2);color:var(--text-muted)">? TEXT</span>' :
+            '<span class="badge" style="background:var(--surface3);border-color:var(--border2);color:var(--text-muted)">— ?</span>'}
+        </td>
+        <td class="td-desc">
+          ${highlight(h.description.slice(0, 160), queryTerms)}
+          <span class="raw-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">show raw row</span>
+          <div class="raw-row">${esc((h.raw||[]).join(' | '))}</div>
+        </td>
+        <td class="td-amount ${isSent?'sent':isRecv?'recv':''}">
+          ${amount && amount>0 ? (isSent?'-':'+') + fmt(amount) : h.unstructured ? '<span style="color:var(--text-dim)">—</span>' : fmt(Math.max(h.debit,h.credit))}
+        </td>
+        <td class="td-score" title="Match score">
+          <span style="color:${scoreColor}">${h.score}%</span>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const hasFinancials = hits.some(h=>!h.unstructured && (h.debit>0 || h.credit>0));
+
+  resultsArea.innerHTML = `
+    <hr class="divider"/>
+
+    <div class="match-meta">
+      <div class="match-title">Results for <span>"${esc(queryText)}"</span></div>
+      <div class="match-count">${hits.length} match${hits.length!==1?'es':''}</div>
+      ${fuzzyCount > 0 ? `<div class="match-fuzzy-tag">⚡ ${fuzzyCount} fuzzy match${fuzzyCount!==1?'es':''}</div>` : ''}
+    </div>
+
+    ${variants.length > 0 ? `
+    <div class="aliases-box">
+      <strong>🏷 Similar names detected in results</strong>
+      ${variants.slice(0,12).map(v=>`<span class="alias-pill">${esc(v)}</span>`).join('')}
+    </div>` : ''}
+
+    ${hasFinancials ? `
+    <div class="summary-grid">
+      <div class="s-card">
+        <div class="s-label">Transactions</div>
+        <div class="s-value count">${hits.length}</div>
+        <div class="s-sub">rows matched</div>
+      </div>
+      <div class="s-card">
+        <div class="s-label">Total Sent</div>
+        <div class="s-value sent">${fmt(totalSent)}</div>
+        <div class="s-sub">debited from you</div>
+      </div>
+      <div class="s-card">
+        <div class="s-label">Total Received</div>
+        <div class="s-value received">${fmt(totalRecv)}</div>
+        <div class="s-sub">credited to you</div>
+      </div>
+      <div class="s-card">
+        <div class="s-label">Net Position</div>
+        <div class="s-value ${net>=0?'net-pos':'net-neg'}">${net>=0?'+':''}${fmt(Math.abs(net))}</div>
+        <div class="s-sub">${net>=0?'you are owed':'you owe'}</div>
+      </div>
+    </div>` : ''}
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th style="text-align:right">Amount</th>
+            <th>Match</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+
+    ${hasFinancials ? `
+    <div class="net-row">
+      <span class="net-label">NET POSITION (received − sent)</span>
+      <span class="net-value ${net>=0?'pos':'neg'}">${net>=0?'+':''}${fmt(Math.abs(net))}</span>
+    </div>` : ''}
+
+    <div class="export-row">
+      <button class="btn-export" id="exportCSVBtn">⬇ Export CSV</button>
+      <button class="btn-export" id="exportJSONBtn">⬇ Export JSON</button>
+    </div>
+  `;
+
+  document.getElementById('exportCSVBtn').addEventListener('click', () => exportCSV(hits, queryText));
+  document.getElementById('exportJSONBtn').addEventListener('click', () => exportJSON(hits, queryText));
+}
+
+// ══════════════════════════════════════════════════════════
+//  EXPORTS
+// ══════════════════════════════════════════════════════════
+function exportCSV(hits, query) {
+  const hdr = ['Date','Time','Type','Amount (₦)','Description','Match Score','Sheet','Raw Row'];
+  const rows = hits.map(h => {
+    const isSent = h.debit>0 && h.credit===0;
+    const amount = isSent ? h.debit : h.credit;
+    return [
+      h.date||'',h.time||'',
+      h.direction||'',
+      amount?amount.toFixed(2):'',
+      '"'+(h.description||'').replace(/"/g,'""')+'"',
+      h.score+'%',
+      h.sheet||'',
+      '"'+(h.raw||[]).join(' | ').replace(/"/g,'""')+'"'
+    ].join(',');
+  });
+  const csv = [hdr.join(','), ...rows].join('\n');
+  dl(csv, `txn_${query.replace(/\s+/g,'_')}_${Date.now()}.csv`, 'text/csv');
+}
+
+function exportJSON(hits, query) {
+  const out = { query, timestamp: new Date().toISOString(), count: hits.length, transactions: hits };
+  dl(JSON.stringify(out, null, 2), `txn_${query.replace(/\s+/g,'_')}_${Date.now()}.json`, 'application/json');
+}
+
+function dl(content, filename, type) {
+  const blob = new Blob([content], {type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+})();
+</script>
+</body>
+</html>
